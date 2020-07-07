@@ -12,3 +12,6 @@ protobuf
 sklearn
 pillow
 deepdish
+pyquaternion
+lxml
+requests
