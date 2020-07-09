@@ -19,14 +19,14 @@ class SE3Poses:
             t = t[None, :]
             self._single = True
             if len(R) > 1:
-                raise ValueError("Different number of translations 1 and 
-                                 rotations {}.".format(len(R)))
+                raise ValueError("Different number of translations 1 and"
+                                " rotations {}.".format(len(R)))
         elif len(t) == 1:
             self._single = True
         else:
             if len(t) != len(R):
-                raise ValueError("Differing number of translations {} and 
-                                 rotations {}".format(len(t),len(R)))
+                raise ValueError("Differing number of translations {} and"
+                                 "rotations {}".format(len(t),len(R)))
         self._t = t
         self._R = R
         self.len = len(R)
@@ -45,23 +45,23 @@ class SE3Poses:
         if not(len(self) == 1 or len(other) == 1 or len(self) == len(other)):
             raise ValueError("Expected equal number of transformations in both "
                              "or a single transformation in either object, "
-                             "got {} transformations in first and {} 
-                             transformations in second object.".format(
+                             "got {} transformations in first and {}"
+                             "transformations in second object.".format(
                                 len(self), len(other)))
-        return self.__class__(self.R().apply(other.t()) + self.t(), i
+        return self.__class__(self.R().apply(other.t()) + self.t(),
                               self.R() * other.R())
 
     def __truediv__(self, other):
         """
-        Computes relative pose, similar to MATLAB convention 
+        Computes relative pose, similar to MATLAB convention
         (x = A \ b for Ax = b). Example: T1 / T2 = T1.inv() * T2
         TO DO: Broadcasting
         """
         if not(len(self) == 1 or len(other) == 1 or len(self) == len(other)):
             raise ValueError("Expected equal number of transformations in both "
                              "or a single transformation in either object, "
-                             "got {} transformations in first and {} 
-                             transformations in second object.".format(
+                             "got {} transformations in first and {}"
+                             "transformations in second object.".format(
                                 len(self), len(other)))
         R1_inv = self.R().inv()
         t_new = R1_inv.apply(other.t() - self.t())
@@ -95,6 +95,16 @@ class SE3Poses:
         q = np.repeat(q, N, axis=0)
         return SE3Poses(t, Rotation.from_quat(q))
 
+def distances(p1, p2):
+    if not(len(p1) == 1 or len(p2) == 1 or len(p1) == len(p2)):
+        raise ValueError("Expected equal number of transformations in both "
+                            "or a single transformation in either object, "
+                            "got {} transformations in first and {}"
+                            "transformations in second object.".format(
+                            len(p1), len(p2)))
+    p_rel = p1 / p2
+    return np.linalg.norm(p_rel.t(), axis=-1), p_rel.R().magnitude()
+
 def metric(p1, p2, w):
     """
     Computes metric on the cartesian product space representation of SE(3).
@@ -106,8 +116,8 @@ def metric(p1, p2, w):
     if not(len(p1) == 1 or len(p2) == 1 or len(p1) == len(p2)):
         raise ValueError("Expected equal number of transformations in both "
                             "or a single transformation in either object, "
-                            "got {} transformations in first and {} 
-                            transformations in second object.".format(
+                            "got {} transformations in first and {}"
+                            "transformations in second object.".format(
                             len(p1), len(p2)))
     if w < 0:
         raise ValueError("Weight must be non-negative, currently {}".format(w))

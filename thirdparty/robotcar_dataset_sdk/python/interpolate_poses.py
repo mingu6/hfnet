@@ -202,8 +202,8 @@ def interpolate_poses(pose_timestamps, abs_poses, requested_timestamps):
     poses_mat[0:3, 3::4] = positions_interp
     poses_mat[3, 3::4] = 1
 
-    poses_out = [0] * (len(requested_timestamps) - 1)
-    for i in range(1, len(requested_timestamps)):
-        poses_out[i - 1] = poses_mat[0:4, i * 4:(i + 1) * 4]
+    poses_out = [0] * len(requested_timestamps)
+    for i in range(len(requested_timestamps)):
+        poses_out[i] = np.asarray(poses_mat[0:4, i * 4:(i + 1) * 4])
 
     return poses_out
