@@ -1,7 +1,7 @@
 tensorflow-gpu==1.12
 torch==0.4.1
 numpy
-scipy
+scipy==1.5.0
 opencv-python
 tqdm
 pyyaml
@@ -15,4 +15,3 @@ deepdish
 pyquaternion
 lxml
 requests
-scipy=1.5.0
