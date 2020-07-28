@@ -1,5 +1,6 @@
 env/
 __pycache__/
 *.egg-info/
-settings.py
+hfnet/settings.py
 .ipynb_checkpoints/
+.DS_Store
