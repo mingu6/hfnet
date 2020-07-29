@@ -132,6 +132,9 @@ if __name__ == "__main__":
     eval_filename_yaml = (
         f"{args.eval_name}_{args.queries}_{args.num_nearest}NN_{args.num_distractors}d"
     )
+    if args.imperfect:
+        eval_filename += "_imperf"
+        eval_filename_yaml += "_imperf"
     eval_path = Path(output_dir, f"{eval_filename_yaml}.yaml")
     with open(eval_path, "w") as f:
         yaml.dump(output, f, default_flow_style=False)

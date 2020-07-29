@@ -92,7 +92,7 @@ class LocalizationOpt(Localization):
             retrieval_indices = topk_matching(
                 global_desc,
                 self.global_descriptors,
-                self.config["num_nearest"] + self.config["num_distractors"],
+                max(self.config["num_nearest"], 20) + self.config["num_distractors"],
             )
             if self.config["num_nearest"] > 0:
                 topk_cameras, relevant_cameras = topk_matching_gps(
@@ -115,7 +115,12 @@ class LocalizationOpt(Localization):
             # distractors outside of the GPS retrievals
             indices = []
             for ind in full_indices:
-                if (ind not in indices) and (ind not in relevant_indices):
+                if (
+                    (ind not in indices)
+                    and (ind not in relevant_indices)
+                    and len(indices)
+                    < self.config["num_nearest"] + self.config["num_distractors"]
+                ):
                     indices.append(int(ind))
             prior_ids = self.db_ids[indices]
         timings["global"] = t.duration
@@ -125,6 +130,7 @@ class LocalizationOpt(Localization):
             clustered_frames = covis_clustering(prior_ids, self.local_db, self.points)
             local_desc = self.local_transform(query_item.local_desc)
         timings["covis"] = t.duration
+        print(len(clustered_frames), len(prior_ids))
 
         # Iterative pose estimation
         dump = []

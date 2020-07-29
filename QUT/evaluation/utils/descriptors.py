@@ -9,7 +9,7 @@ def topk_matching_gps(query_pose, db_gps, k, imperfect=False):
     """
     cameras_agg = db_gps.kNN(query_pose, max(k, 20))
     if imperfect:
-        cameras = np.choice(cameras, size=k)
+        cameras = np.random.choice(cameras_agg, size=k)
     else:
         cameras = db_gps.kNN(query_pose, k)
     return cameras, cameras_agg
