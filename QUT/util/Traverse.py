@@ -11,14 +11,14 @@ from . import geometry
 from .geometry import SE3
 
 Camera = namedtuple("Camera", ["poses", "timestamps", "descriptors"])
-attributes = ["name", "timestamps", "traverse_name", "dataset_name", "export_name"]
+attributes = ["name", "timestamps", "traverse_name", "dataset_name", "experiment_name"]
 
 
 class Traverse:
-    def __init__(self, dataset_name, traverse_name, export_name):
+    def __init__(self, dataset_name, traverse_name, experiment_name):
         self.dataset_name = dataset_name
         self.traverse_name = traverse_name
-        self.export_name = export_name
+        self.experiment_name = experiment_name
         # import INS data
         gps_dir = os.path.join(DATA_PATH, dataset_name, "gps", traverse_name)
         for i, gpsname in enumerate(os.listdir(gps_dir)):
@@ -41,24 +41,20 @@ class Traverse:
             descriptor_dir = os.path.join(
                 EXPER_PATH,
                 "exports",
-                export_name,
-                dataset_name,
+                experiment_name,
                 traverse_name,
                 cam_name,
             )
-            descriptors_files = [
-                os.path.join(descriptor_dir, dname)
-                for dname in os.listdir(descriptor_dir)
-            ]
-            D = len(np.load(descriptors_files[0])["global_descriptor"])
+            example_fname = os.listdir(descriptor_dir)[0]
+            D = len(np.load(os.path.join(descriptor_dir, example_fname))
+                    ["global_descriptor"])
             descriptors = np.empty((len(self.timestamps), D))
             for i, tstamp in enumerate(tqdm(self.timestamps)):
                 dpath = os.path.join(descriptor_dir, str(tstamp) + ".npz")
                 descriptors[i, :] = np.load(dpath)["global_descriptor"]
             poses = SE3.from_xyzrpy(xyzrpy)
-            camera = Camera(
-                poses=poses, timestamps=self.timestamps, descriptors=descriptors
-            )
+            camera = Camera(poses=poses, timestamps=self.timestamps,
+                            descriptors=descriptors)
             setattr(self, cam_name, camera)
 
     def __len__(self):
@@ -83,13 +79,35 @@ class Traverse:
                     "timestamp": timestamps[ind],
                     "t_err": t_err[ind],
                     "R_err": R_err[ind] * 180 / np.pi,
+                    "ind": ind,
                 }
             )
         return retrieved
 
-    def retrieve_distractors(self, k):
+    def retrieve_distractors(self, query_attr, k):
         # identify relevant images
-        query_attr
+        query_pose = query_attr["pose"]
+        relevant = self.kNN(query_pose, 10)
+        relevant_ind = [attr["ind"] for attr in relevant]
+        # image retrieval
+        img_retrieval = self.topk_descriptors(query_attr, 10 + k)
+        retrieval_ind = [attr["ind"] for attr in img_retrieval]
+        # compute INS error
+        poses, timestamps, cameras, descriptors = self._aggregate()
+        t_err, R_err = geometry.error(query_pose, poses)
+        # cull retrieved images that are close to gt ("relevant")
+        distractors = []
+        for ind in retrieval_ind:
+            if ind not in relevant_ind and len(distractors) < k:
+                distractors.append(
+                    {
+                        "camera": cameras[ind],
+                        "timestamp": timestamps[ind],
+                        "t_err": t_err[ind],
+                        "R_err": R_err[ind] * 180 / np.pi,
+                        "ind": ind,
+                    })
+        return distractors
 
     def query_attr(self, camera, timestamp):
         """
@@ -99,17 +117,25 @@ class Traverse:
         # locate camera timestamp index and return associated pose
         i = bisect_left(camera.timestamps, timestamp)
         if i != len(camera.timestamps) and camera.timestamps[i] == timestamp:
-            return {"pose": camera.poses[i], "descriptor": camera.descriptors[i]}
+            return {"pose": camera.poses[i],
+                    "descriptor": camera.descriptors[i],
+                    "ind": i}
         return None
 
-    def kNN(self, pose, k, alpha=5):
+    def kNN(self, pose, k, alpha=5, imperfect=False):
         retrieved = []
         # aggregate all cameras and find NN images
         poses, timestamps, cameras, _ = self._aggregate()
         # find NNs
         t_err, R_err = geometry.error(pose, poses)
         dist = geometry.metric(pose, poses, alpha)
-        match_ind = np.argpartition(dist, k)[:k]
+        if imperfect:
+            # imperfect retrieval retrieves k random relevant images
+            match_ind = np.argpartition(dist, max(10, k))[:max(10, k)]
+            match_ind = np.random.choice(match_ind, k)
+        else:
+            match_ind = np.argpartition(dist, k)[:k]
+        match_ind = match_ind[np.argsort(dist[match_ind])]
         for ind in match_ind:
             retrieved.append(
                 {
@@ -117,6 +143,7 @@ class Traverse:
                     "timestamp": timestamps[ind],
                     "t_err": t_err[ind],
                     "R_err": R_err[ind] * 180 / np.pi,
+                    "ind": ind,
                 }
             )
         return retrieved
@@ -138,6 +165,7 @@ class Traverse:
                             "timestamp": self.timestamps[ind],
                             "t_err": t_err[ind],
                             "R_err": R_err[ind] * 180 / np.pi,
+                            "ind": ind,
                         }
                     )
         return retrieved

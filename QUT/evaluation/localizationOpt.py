@@ -42,14 +42,7 @@ class LocalizationOpt(Localization):
         # load GPS data for reference
         if dataset_name == "robotcar":
             traverse = "overcast-reference"
-        traverse_name = dataset_name + "/" + traverse
-        gps_dir = os.path.join(DATA_PATH, dataset_name, "gps", traverse)
-        camera_poses = {}
-        for fname in os.listdir(gps_dir):
-            poses_df = pd.read_csv(os.path.join(gps_dir, fname))
-            camName = fname[:-10]
-            camera_poses[camName] = poses_df
-        self.gps = Traverse(traverse_name, **camera_poses)
+        self.gps = Traverse(dataset_name, traverse, config["global"]["experiment"])
 
     def init_queries(self, query_file, query_config, prefix=""):
         queries = read_query_list(Path(self.base_path, query_file), prefix=prefix)
@@ -57,14 +50,8 @@ class LocalizationOpt(Localization):
         query_config = {**query_config, "image_names": [q.name for q in queries]}
         query_dataset = Dataset(**query_config)
         # load GPS data for queries
-        traverse_name = self.dataset_name + "/" + self.config["queries"]
-        gps_dir = os.path.join(self.base_path, "gps", self.config["queries"])
-        camera_poses = {}
-        for fname in os.listdir(gps_dir):
-            poses_df = pd.read_csv(os.path.join(gps_dir, fname))
-            camName = fname[:-10]
-            camera_poses[camName] = poses_df
-        query_gps = Traverse(traverse_name, **camera_poses)
+        query_gps = Traverse(self.dataset_name, self.config["queries"],
+                             self.gps.experiment_name)
         return queries, query_dataset, query_gps
 
     def localize(self, query_info, query_data, query_gps, debug=False):
@@ -86,42 +73,22 @@ class LocalizationOpt(Localization):
 
         # Global matching
         with Timer() as t:
-            global_desc = self.global_transform(query_item.global_desc[np.newaxis])[0]
+            global_desc = self.global_transform(
+                query_item.global_desc[np.newaxis])[0]
             splits = query_info.name.split("/")
-            gps_pose = query_gps.query_img(splits[1], int(splits[2][:-4]))
-            retrieval_indices = topk_matching(
-                global_desc,
-                self.global_descriptors,
-                max(self.config["num_nearest"], 20) + self.config["num_distractors"],
-            )
+            query_attr = query_gps.query_attr(splits[1], int(splits[2][:-4]))
             if self.config["num_nearest"] > 0:
-                topk_cameras, relevant_cameras = topk_matching_gps(
-                    gps_pose,
-                    self.gps,
-                    self.config["num_nearest"],
-                    self.config["imperfect"],
-                )
-                nn_indices = retrieve_indices(
-                    self.dataset_name, self.db_names, topk_cameras
-                )
-                relevant_indices = retrieve_indices(
-                    self.dataset_name, self.db_names, relevant_cameras
-                )
-                # full index set includes GPS retrieval and distractors
-                full_indices = np.concatenate((nn_indices, retrieval_indices))
+                distractors = self.gps.retrieve_distractors(
+                    query_attr, self.config["num_distractors"])
+                nearest = self.gps.kNN(query_attr["pose"],
+                                       self.config["num_nearest"],
+                                       self.config["imperfect"])
+                relevant_cameras = nearest + distractors
             else:
-                relevant_indices = []
-                full_indices = retrieval_indices
-            # distractors outside of the GPS retrievals
-            indices = []
-            for ind in full_indices:
-                if (
-                    (ind not in indices)
-                    and (ind not in relevant_indices)
-                    and len(indices)
-                    < self.config["num_nearest"] + self.config["num_distractors"]
-                ):
-                    indices.append(int(ind))
+                relevant_cameras = self.gps.topk_descriptors(
+                    query_attr, self.config["num_distractors"])
+            indices = retrieve_indices(self.dataset_name,
+                                       self.db_names, relevant_cameras)
             prior_ids = self.db_ids[indices]
         timings["global"] = t.duration
 
@@ -130,7 +97,6 @@ class LocalizationOpt(Localization):
             clustered_frames = covis_clustering(prior_ids, self.local_db, self.points)
             local_desc = self.local_transform(query_item.local_desc)
         timings["covis"] = t.duration
-        print(len(clustered_frames), len(prior_ids))
 
         # Iterative pose estimation
         dump = []
