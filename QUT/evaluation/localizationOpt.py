@@ -68,114 +68,132 @@ class LocalizationOpt(Localization):
         return queries, query_dataset, query_gps
 
     def localize(self, query_info, query_data, query_gps, debug=False):
-        config_global = self.config['global']
-        config_local = self.config['local']
-        config_pose = self.config['pose']
+        config_global = self.config["global"]
+        config_local = self.config["local"]
+        config_pose = self.config["pose"]
         timings = {}
 
         # Fetch data
-        query_item = extract_query(
-            query_data, query_info, config_global, config_local)
+        query_item = extract_query(query_data, query_info, config_global, config_local)
 
         # C++ backend
         if self.use_cpp:
             assert not debug
-            assert hasattr(self, 'cpp_backend')
+            assert hasattr(self, "cpp_backend")
             return self.cpp_backend.localize(
-                query_info, query_item,
-                self.global_transform, self.local_transform)
+                query_info, query_item, self.global_transform, self.local_transform
+            )
 
         # Global matching
         with Timer() as t:
-            global_desc = self.global_transform(
-                query_item.global_desc[np.newaxis])[0]
-            splits = query_info.name.split('/')
+            global_desc = self.global_transform(query_item.global_desc[np.newaxis])[0]
+            splits = query_info.name.split("/")
             gps_pose = query_gps.query_img(splits[1], int(splits[2][:-4]))
             retrieval_indices = topk_matching(
                 global_desc,
                 self.global_descriptors,
-                self.config["num_nearest"] +
-                self.config["num_distractors"])
-            topk_cameras = topk_matching_gps(gps_pose,
-                                             self.gps,
-                                             self.config["num_nearest"])
-            nn_indices = retrieve_indices(self.dataset_name,
-                                          self.db_names, topk_cameras)
-            # full index set includes GPS retrieval and distractors
-            full_indices = np.concatenate(
-                (nn_indices, retrieval_indices)
+                self.config["num_nearest"] + self.config["num_distractors"],
             )
+            if self.config["num_nearest"] > 0:
+                topk_cameras, relevant_cameras = topk_matching_gps(
+                    gps_pose,
+                    self.gps,
+                    self.config["num_nearest"],
+                    self.config["imperfect"],
+                )
+                nn_indices = retrieve_indices(
+                    self.dataset_name, self.db_names, topk_cameras
+                )
+                relevant_indices = retrieve_indices(
+                    self.dataset_name, self.db_names, relevant_cameras
+                )
+                # full index set includes GPS retrieval and distractors
+                full_indices = np.concatenate((nn_indices, retrieval_indices))
+            else:
+                relevant_indices = []
+                full_indices = retrieval_indices
             # distractors outside of the GPS retrievals
             indices = []
             for ind in full_indices:
-                if ind not in indices:
-                    indices.append(ind)
+                if (ind not in indices) and (ind not in relevant_indices):
+                    indices.append(int(ind))
             prior_ids = self.db_ids[indices]
-        timings['global'] = t.duration
+        timings["global"] = t.duration
 
         # Clustering
         with Timer() as t:
-            clustered_frames = covis_clustering(
-                prior_ids, self.local_db, self.points)
+            clustered_frames = covis_clustering(prior_ids, self.local_db, self.points)
             local_desc = self.local_transform(query_item.local_desc)
-        timings['covis'] = t.duration
+        timings["covis"] = t.duration
 
         # Iterative pose estimation
         dump = []
         results = []
-        timings['local'], timings['pnp'] = 0, 0
+        timings["local"], timings["pnp"] = 0, 0
         for place in clustered_frames:
             # Local matching
             matches_data = {} if debug else None
             matches, place_lms, duration = match_against_place(
-                place, self.local_db, local_desc, config_local['ratio_thresh'],
-                do_fast_matching=config_local.get('fast_matching', True),
-                debug_dict=matches_data)
-            timings['local'] += duration
+                place,
+                self.local_db,
+                local_desc,
+                config_local["ratio_thresh"],
+                do_fast_matching=config_local.get("fast_matching", True),
+                debug_dict=matches_data,
+            )
+            timings["local"] += duration
 
             # PnP
             if len(matches) > 3:
                 with Timer() as t:
                     matched_kpts = query_item.keypoints[matches[:, 0]]
                     matched_lms = np.stack(
-                        [self.points[place_lms[i]].xyz for i in matches[:, 1]])
+                        [self.points[place_lms[i]].xyz for i in matches[:, 1]]
+                    )
                     result, inliers = do_pnp(
-                        matched_kpts, matched_lms, query_info, config_pose)
-                timings['pnp'] += t.duration
+                        matched_kpts, matched_lms, query_info, config_pose
+                    )
+                timings["pnp"] += t.duration
             else:
                 result = loc_failure
                 inliers = np.empty((0,), np.int32)
 
             results.append(result)
             if debug:
-                dump.append({
-                    'query_item': query_item,
-                    'prior_ids': prior_ids,
-                    'places': clustered_frames,
-                    'matching': matches_data,
-                    'matches': matches,
-                    'inliers': inliers,
-                })
+                dump.append(
+                    {
+                        "query_item": query_item,
+                        "prior_ids": prior_ids,
+                        "places": clustered_frames,
+                        "matching": matches_data,
+                        "matches": matches,
+                        "inliers": inliers,
+                    }
+                )
             if result.success:
                 break
 
         # In case of failure we return the pose of the first retrieved prior
         if not result.success:
             result = results[0]
-            result = LocResult(False, result.num_inliers, result.inlier_ratio,
-                               colmap_image_to_pose(self.images[prior_ids[0]]))
+            result = LocResult(
+                False,
+                result.num_inliers,
+                result.inlier_ratio,
+                colmap_image_to_pose(self.images[prior_ids[0]]),
+            )
 
         if debug:
             debug_data = {
                 **(dump[-1 if result.success else 0]),
-                'index_success': (len(dump)-1) if result.success else -1,
-                'dumps': dump,
-                'results': results,
-                'timings': timings
+                "index_success": (len(dump) - 1) if result.success else -1,
+                "dumps": dump,
+                "results": results,
+                "timings": timings,
             }
             return result, debug_data
         else:
-            return result, {'timings': timings}
+            return result, {"timings": timings}
 
 
 def evaluate(loc, queries, query_dataset, query_gps, max_iter=None):

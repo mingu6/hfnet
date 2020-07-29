@@ -91,6 +91,7 @@ if __name__ == "__main__":
     parser.add_argument("--cpp_backend", action="store_true")
     parser.add_argument("--num_nearest", default=1, type=int)
     parser.add_argument("--num_distractors", default=1, type=int)
+    parser.add_argument("--imperfect", action="store_true")
     args = parser.parse_args()
 
     config = {
@@ -104,6 +105,7 @@ if __name__ == "__main__":
         "use_cpp": args.cpp_backend,
         "num_nearest": args.num_nearest,
         "num_distractors": args.num_distractors,
+        "imperfect": args.imperfect,
     }
     logging.info("Evaluating Robotcar with configuration: \n" + pformat(config))
     loc = LocalizationOpt("robotcar", args.model, config, build_db=args.build_db)
@@ -112,7 +114,9 @@ if __name__ == "__main__":
     queries, query_dataset, query_gps = loc.init_queries(query_file, config_robotcar)
 
     logging.info("Starting evaluation")
-    metrics, results = evaluate(loc, queries, query_dataset, query_gps, max_iter=args.max_iter)
+    metrics, results = evaluate(
+        loc, queries, query_dataset, query_gps, max_iter=args.max_iter
+    )
     logging.info("Evaluation metrics: \n" + pformat(metrics))
 
     output = {"config": config, "metrics": metrics}
@@ -122,8 +126,12 @@ if __name__ == "__main__":
         query_cat = "night"
     else:
         query_cat = "day"
-    eval_filename = f"{args.eval_name}_{query_cat}_{args.num_nearest}NN_{args.num_distractors}d"
-    eval_filename_yaml = f"{args.eval_name}_{args.queries}_{args.num_nearest}NN_{args.num_distractors}d"
+    eval_filename = (
+        f"{args.eval_name}_{query_cat}_{args.num_nearest}NN_{args.num_distractors}d"
+    )
+    eval_filename_yaml = (
+        f"{args.eval_name}_{args.queries}_{args.num_nearest}NN_{args.num_distractors}d"
+    )
     eval_path = Path(output_dir, f"{eval_filename_yaml}.yaml")
     with open(eval_path, "w") as f:
         yaml.dump(output, f, default_flow_style=False)
